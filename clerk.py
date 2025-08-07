@@ -1,15 +1,18 @@
 import os
 import openai
+from openai import OpenAI
 import argparse
 from pydub import AudioSegment
 from math import ceil
 
 # ✅ Whisper API
 openai.api_key = os.environ.get("OPENAI_API_KEY")
-
+client = OpenAI()  # APIキーは環境変数 OPENAI_API_KEY を自動的に使用
 
 def split_audio(file_path, chunk_length_minutes):
-    audio_format = os.path.splitext(file_path)[1][1:]  # 拡張子からフォーマット取得（例: m4a, mp3）
+    audio_format = os.path.splitext(file_path)[1][1:]  # 入力形式（例: m4a）
+    output_format = "mp3"  # ✅ 出力はmp3に固定（m4a不可）
+
     audio = AudioSegment.from_file(file_path, format=audio_format)
     chunk_length_ms = chunk_length_minutes * 60 * 1000
     total_chunks = ceil(len(audio) / chunk_length_ms)
@@ -19,18 +22,19 @@ def split_audio(file_path, chunk_length_minutes):
         start = i * chunk_length_ms
         end = min(start + chunk_length_ms, len(audio))
         chunk = audio[start:end]
-        chunk_path = f"chunk_{i+1}.{audio_format}"
-        chunk.export(chunk_path, format=audio_format)
+        chunk_path = f"chunk/chunk_{i+1}.{output_format}"
+        chunk.export(chunk_path, format=output_format)
         chunk_paths.append(chunk_path)
 
     return chunk_paths
 
-
 def transcribe_audio(file_path):
     with open(file_path, "rb") as f:
-        transcript = openai.Audio.transcribe("whisper-1", f)
-        return transcript["text"]
-
+        transcript = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=f
+        )
+        return transcript.text
 
 def summarize_text(text):
     messages = [
@@ -45,7 +49,6 @@ def summarize_text(text):
     )
 
     return response["choices"][0]["message"]["content"]
-
 
 def main():
     parser = argparse.ArgumentParser(description="音声ファイルを文字起こしし、要約を作成します。")
