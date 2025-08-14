@@ -1,12 +1,12 @@
 import os
-import openai
+from openai import OpenAI
 import argparse
 from pydub import AudioSegment
 from math import ceil
 import whisper
 
-# ✅ Whisper API
 # openai.api_key = os.environ.get("OPENAI_API_KEY")
+client = OpenAI()
 
 # Load the Whisper model
 model = whisper.load_model('base')
@@ -40,8 +40,8 @@ def summarize_text(text):
         {"role": "user", "content": f"以下の音声文字起こし結果を要約してください：\n{text}"}
     ]
 
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
         messages=messages,
         temperature=0.5,
     )
@@ -53,6 +53,7 @@ def main():
     parser.add_argument("--input", required=True, help="入力音声ファイルのパス（例: meeting.m4a）")
     parser.add_argument("--transcript-output", default="transcript.txt", help="文字起こしファイルの出力パス")
     parser.add_argument("--summary-output", default="summary.txt", help="要約ファイルの出力パス")
+    parser.add_argument("--summarize", choices=["yes", "none"], default="yes", help="yes: 要約する, none: 要約しない")
     parser.add_argument("--chunk-minutes", type=int, default=5, help="音声分割単位（分）")
 
     args = parser.parse_args()
@@ -68,16 +69,19 @@ def main():
     full_text = "\n".join(all_transcripts)
     print("[INFO] Transcription complete.")
 
-    print("[INFO] Generating summary ...")
-    summary = summarize_text(full_text)
-
     with open(args.transcript_output, "w", encoding="utf-8") as f:
         f.write(full_text)
     print(f"[DONE] 文字起こしを {args.transcript_output} に出力しました。")
 
-    with open(args.summary_output, "w", encoding="utf-8") as f:
-        f.write(summary)
-    print(f"[DONE] 要約を {args.summary_output} に出力しました。")
+    # Sumarrize
+    if args.summarize == "yes":
+        print("[INFO] Generating summary ...")
+        summary = summarize_text(full_text)
+        with open(args.summary_output, "w", encoding="utf-8") as f:
+            f.write(summary)
+        print(f"[DONE] 要約を {args.summary_output} に出力しました。")
+    else:
+        print("[INFO] 要約はスキップしました。")
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ Transcribe and summarize audio files automatically with AI.
 | --input | path to input sound file | ✔ |
 | --transcript-output | path to output transcript file | |
 | --summary-output | path to output summary file | |
+| --summarize | enable or disable summarization. choice [yes(default), none] | |
 
 ```sh
 python clerk.py \
