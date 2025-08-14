@@ -1,13 +1,15 @@
 import os
 import openai
-from openai import OpenAI
 import argparse
 from pydub import AudioSegment
 from math import ceil
+import whisper
 
 # ✅ Whisper API
-openai.api_key = os.environ.get("OPENAI_API_KEY")
-client = OpenAI()  # APIキーは環境変数 OPENAI_API_KEY を自動的に使用
+# openai.api_key = os.environ.get("OPENAI_API_KEY")
+
+# Load the Whisper model
+model = whisper.load_model('base')
 
 def split_audio(file_path, chunk_length_minutes):
     audio_format = os.path.splitext(file_path)[1][1:]  # 入力形式（例: m4a）
@@ -29,12 +31,8 @@ def split_audio(file_path, chunk_length_minutes):
     return chunk_paths
 
 def transcribe_audio(file_path):
-    with open(file_path, "rb") as f:
-        transcript = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=f
-        )
-        return transcript.text
+    result = model.transcribe(file_path)
+    return result['text']
 
 def summarize_text(text):
     messages = [
