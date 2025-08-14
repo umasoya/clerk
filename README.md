@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="img/clerk_1024x1024.png" alt="clerk_logo" width="300">
+</p>
+
 # clerk
 
 Transcribe and summarize audio files automatically with AI.
