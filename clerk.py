@@ -1,66 +1,122 @@
+# clerk.py
 import os
-from openai import OpenAI
 import argparse
-from pydub import AudioSegment
+from pathlib import Path
 from math import ceil
+
+from pydub import AudioSegment
 import whisper
 
-# openai.api_key = os.environ.get("OPENAI_API_KEY")
-client = OpenAI()
+from summarizer import get_summarizer
+from core.factory import get_provider_for_model  # ← MODELからPROVIDERを取得
 
-# Load the Whisper model
-model = whisper.load_model('base')
 
-def split_audio(file_path, chunk_length_minutes):
-    audio_format = os.path.splitext(file_path)[1][1:]  # 入力形式（例: m4a）
-    output_format = "mp3"  # ✅ 出力はmp3に固定（m4a不可）
+# ---- Transcribe (Whisper local) ----
+WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "base")
+whisper_model = whisper.load_model(WHISPER_MODEL_NAME)
 
-    audio = AudioSegment.from_file(file_path, format=audio_format)
-    chunk_length_ms = chunk_length_minutes * 60 * 1000
-    total_chunks = ceil(len(audio) / chunk_length_ms)
-    chunk_paths = []
+
+def split_audio(file_path: str, chunk_length_minutes: int) -> list[str]:
+    """
+    入力ファイルを chunk/ 以下に mp3 で分割して保存し、パスの配列を返す。
+    """
+    src = Path(file_path)
+    if not src.exists():
+        raise FileNotFoundError(f"input not found: {file_path}")
+
+    out_dir = Path("chunk")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    input_format = src.suffix.lstrip(".")  # 例: "m4a"
+    output_format = "mp3"                  # m4a は書けない環境が多いので mp3 に固定
+
+    audio = AudioSegment.from_file(src, format=input_format)
+    chunk_ms = chunk_length_minutes * 60 * 1000
+    total_chunks = max(1, ceil(len(audio) / chunk_ms))
+    paths: list[str] = []
 
     for i in range(total_chunks):
-        start = i * chunk_length_ms
-        end = min(start + chunk_length_ms, len(audio))
+        start = i * chunk_ms
+        end = min(start + chunk_ms, len(audio))
         chunk = audio[start:end]
-        chunk_path = f"chunk/chunk_{i+1}.{output_format}"
-        chunk.export(chunk_path, format=output_format)
-        chunk_paths.append(chunk_path)
+        out = out_dir / f"chunk_{i + 1}.{output_format}"
+        chunk.export(out, format=output_format)
+        paths.append(str(out))
 
-    return chunk_paths
+    return paths
 
-def transcribe_audio(file_path):
-    result = model.transcribe(file_path)
-    return result['text']
 
-def summarize_text(text):
-    messages = [
-        {"role": "system", "content": "あなたは優秀な議事録作成者です。"},
-        {"role": "user", "content": f"以下の音声文字起こし結果を要約してください：\n{text}"}
-    ]
+def transcribe_audio(file_path: str) -> str:
+    """
+    Whisper で単一オーディオを文字起こし。
+    """
+    result = whisper_model.transcribe(file_path)
+    return result["text"]
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        temperature=0.5,
+
+def summarize_text(
+    text: str,
+    *,
+    model: str,
+    temperature: float | None = None,
+    style: str | None = None,
+    language: str | None = None,
+) -> str:
+    """
+    MODEL だけ受け取り、factory側のテーブルで PROVIDER を決定して要約する。
+    プロンプトは core/prompt.py の日本語デフォルト（議事録向け）を使用。
+    """
+    provider = get_provider_for_model(model)
+
+    summarizer = get_summarizer(
+        provider,
+        model=model,
+        # 代表的な引数（必要なら環境変数から渡す）
+        api_key=os.getenv("OPENAI_API_KEY"),
+        base_url=os.getenv("GPT_OSS_BASE_URL"),
     )
 
-    return response["choices"][0]["message"]["content"]
+    options = {}
+    if temperature is not None:
+        options["temperature"] = temperature
+
+    return summarizer.summarize(
+        text,
+        style=style,
+        language=language,
+        options=(options or None),
+    )
+
 
 def main():
-    parser = argparse.ArgumentParser(description="音声ファイルを文字起こしし、要約を作成します。")
+    parser = argparse.ArgumentParser(
+        description="音声ファイルを文字起こしし、要約を作成します。"
+    )
     parser.add_argument("--input", required=True, help="入力音声ファイルのパス（例: meeting.m4a）")
-    parser.add_argument("--transcript-output", default="transcript.txt", help="文字起こしファイルの出力パス")
-    parser.add_argument("--summary-output", default="summary.txt", help="要約ファイルの出力パス")
-    parser.add_argument("--summarize", choices=["yes", "none"], default="yes", help="yes: 要約する, none: 要約しない")
+    parser.add_argument("--transcript-output", default="transcript.txt", help="文字起こしの出力パス")
+    parser.add_argument("--summary-output", default="summary.txt", help="要約の出力パス")
+    parser.add_argument("--summarize", choices=["yes", "none"], default="yes", help="yes: 要約する / none: しない")
     parser.add_argument("--chunk-minutes", type=int, default=5, help="音声分割単位（分）")
+
+    # モデルは必須 or 環境変数 LLM_MODEL から
+    parser.add_argument(
+        "--model",
+        default=os.getenv("LLM_MODEL", None),
+        required=True
+        help="使用モデル（例: gpt-4o-mini, gpt-oss-20b）",
+    )
+
+    # 追加パラメータ（任意）
+    parser.add_argument("--temperature", type=float, default=0.2, help="生成温度（例: 0.5）")
+    parser.add_argument("--style", default=None, help="スタイル指示（例: 箇条書きで簡潔に）")
+    parser.add_argument("--language", default="日本語", help="出力言語（例: 日本語, 英語）")
 
     args = parser.parse_args()
 
+    # --- Split & Transcribe ---
     chunk_files = split_audio(args.input, args.chunk_minutes)
 
-    all_transcripts = []
+    all_transcripts: list[str] = []
     for path in chunk_files:
         print(f"[INFO] Transcribing {path} ...")
         text = transcribe_audio(path)
@@ -73,10 +129,16 @@ def main():
         f.write(full_text)
     print(f"[DONE] 文字起こしを {args.transcript_output} に出力しました。")
 
-    # Sumarrize
+    # --- Summarize ---
     if args.summarize == "yes":
         print("[INFO] Generating summary ...")
-        summary = summarize_text(full_text)
+        summary = summarize_text(
+            full_text,
+            model=args.model,
+            temperature=args.temperature,
+            style=args.style,
+            language=args.language,
+        )
         with open(args.summary_output, "w", encoding="utf-8") as f:
             f.write(summary)
         print(f"[DONE] 要約を {args.summary_output} に出力しました。")
