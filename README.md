@@ -11,6 +11,7 @@ Transcribe and summarize audio files automatically with AI.
 - Python
     - openai
     - pydub
+    - httpx
 - ffmpeg
 
 ## Environment
@@ -18,6 +19,8 @@ Transcribe and summarize audio files automatically with AI.
 | key | description |
 | -- | -- |
 | OPENAI_API_KEY | API KEY |
+| LLM_MODEL | llm model |
+| GPT_OSS_BASE_URL | gpt-oss server url |
 
 ## Usage
 
